@@ -53,13 +53,42 @@ document.addEventListener('visibilitychange', () => {
     onSubmit = noop
 })
 
+function saveSelection() {
+    if (window.getSelection) {
+        var sel = window.getSelection();
+        if (sel.getRangeAt && sel.rangeCount) {
+            return sel.getRangeAt(0);
+        }
+    } else if (document.selection && document.selection.createRange) {
+        return document.selection.createRange();
+    }
+    return null;
+}
+
+function restoreSelection(range) {
+    if (range) {
+        if (window.getSelection) {
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        } else if (document.selection && range.select) {
+            range.select();
+        }
+    }
+}
+
+const isInput = e => ['INPUT', 'TEXTAREA'].includes(e.tagName)
+
 const isVisible = elem => !!elem && !!(elem.offsetWidth || elem.offsetHeight || elem.getClientRects().length)
 
 //hide input on off click
-const handleClickOutside = (element) => {
+const handleClickOutside = (element, currentFocus, range) => {
     const outsideClickListener = event => {
         if (!element.contains(event.target) && isVisible(element)) {
             userInputContainer.style.setProperty("visibility", "hidden", "important")
+            if (!isInput(currentFocus)) {
+                restoreSelection(range)
+            }
             removeClickListener()
         }
     }
@@ -82,24 +111,39 @@ const handleClickOutside = (element) => {
     getSelection does not work for textareas/ input elements in firefox or internet explorer  
     must find another way to get selected content
 
+    setting focus only works for textarea/input elements
+
+    none of this works for iframes
 */
 //override document copy event handler (copy event bubbles from element to document)
 document.querySelector("body").addEventListener("copy", (event) => {
 
-    // may not work in input or textarea elements
-    const selection = document.getSelection().toString()
+    // only works for input or textarea elements
+    const currentFocus = document.activeElement
+
+    let selection
+    let range = saveSelection()
+    if (isInput(currentFocus)) {
+        selection = currentFocus.value.slice(currentFocus.selectionStart, currentFocus.selectionEnd)
+    } else if (currentFocus.tagName === 'IFRAME') {
+        // do not support iframes (default copy)
+        return
+    } else {
+        selection = document.getSelection().toString()
+
+        // save selction for refocusing after copying
+        saveSelection(selection)
+    }
+
+    if (!selection || selection === "") return
 
     // allow normal use of clipboard ctrl-c / ctrl-p outside browser window
     event.clipboardData.setData('text/plain', selection)
 
     userInputContainer.style.setProperty("visibility", "visible", "important")
-
-    // only works for input or textarea elements
-    const currentFocus = document.activeElement
-
     userInput.focus()
 
-    handleClickOutside(userInputContainer)
+    handleClickOutside(userInputContainer, currentFocus, range)
 
     onSubmit = (e) => {
         const data = {}
@@ -110,44 +154,69 @@ document.querySelector("body").addEventListener("copy", (event) => {
         userInput.value = ""
         userInputContainer.style.setProperty("visibility", "hidden", "important")
         currentFocus.focus()
+        if (currentFocus.isContentEdidiable) {
+            restoreSelection(range)
+        }
         e.preventDefault()
+
+        //refocus selection
+        restoreSelection(selection)
     }
     event.preventDefault()
 })
 
-// inorder to use the default paste implementation (and avoid differentiating between 
-// content editable and input/texarea elments) I am calling document.execCommand("paste")
-// after setting the clipboard content to the retrieved data, but this command calls the
-// event which I am overriding creating an infinate loop, thus I hacked with this i = 0 thing
-// which is not good and should go away
-let i = 0
 //override document paste event handler (paste event bubbles from element to document)
 document.querySelector("body").addEventListener("paste", (event) => {
-    if (i % 2 === 1) {
-        ++i
-        return
-    }
-    userInputContainer.style.setProperty("visibility", "visible", "important")
     const currentFocus = document.activeElement
+
+    // do not support iframes (default paste)
+    if (currentFocus.tagName === "IFRAME") return
+
+    const paste = (event.clipboardData || window.clipboardData).getData('text');
+    let range = saveSelection()
+   
+    userInputContainer.style.setProperty("visibility", "visible", "important")
     userInput.focus()
 
     handleClickOutside(userInputContainer)
 
     onSubmit = (e) => {
+        e.preventDefault()
         const inputValue = userInput.value
         userInput.value = ""
         userInputContainer.style.setProperty("visibility", "hidden", "important")
+        if (inputValue === "") {
+            if (isInput(currentFocus)) {
+                const currentValue = currentFocus.value
+                const start = currentFocus.selectionStart
+                currentFocus.value = currentValue.slice(0, start) + paste + currentValue.slice(start)
+            } else {
+                restoreSelection(range)
+                const selection = window.getSelection();
+                if (!selection.rangeCount) return false;
+                selection.deleteFromDocument();
+                selection.getRangeAt(0).insertNode(document.createTextNode(paste));
 
-        browser.storage.local.get(inputValue).then(data => {
-            console.log(currentFocus)
-            currentFocus.focus()
-            console.log(currentFocus)
-            navigator.clipboard.writeText(data[inputValue]).then(
-                document.execCommand("paste")
-            )
-        })
-        e.preventDefault()
+            }
+        } else {
+            browser.storage.local.get(inputValue).then(data => {
+                const paste = data[inputValue]
+                if (paste) {
+                    currentFocus.focus()
+                    if (isInput(currentFocus)) {
+                        const currentValue = currentFocus.value
+                        const start = currentFocus.selectionStart
+                        currentFocus.value = currentValue.slice(0, start) + paste + currentValue.slice(start)
+                    } else if (currentFocus.isContentEdidiable) {
+                        restoreSelection(range)
+                        const selection = window.getSelection();
+                        if (!selection.rangeCount) return false;
+                        selection.deleteFromDocument();
+                        selection.getRangeAt(0).insertNode(document.createTextNode(paste));
+                    }
+                }
+            })
+        }
     }
     event.preventDefault()
-    ++i;
 })

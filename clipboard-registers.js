@@ -71,7 +71,18 @@ const handleClickOutside = (element) => {
     document.addEventListener('click', outsideClickListener)
     onSubmit = noop
 }
+/*
+    there are two types of editable content in html those with the contentEditable attribute 
+    set to true and input/ textareas 
 
+    each needs to be handled differently for setting and resetting the focus of an element  
+
+    copy needs to do nothing when there isnt any text selected
+
+    getSelection does not work for textareas/ input elements in firefox or internet explorer  
+    must find another way to get selected content
+
+*/
 //override document copy event handler (copy event bubbles from element to document)
 document.querySelector("body").addEventListener("copy", (event) => {
 
@@ -82,10 +93,11 @@ document.querySelector("body").addEventListener("copy", (event) => {
     event.clipboardData.setData('text/plain', selection)
 
     userInputContainer.style.setProperty("visibility", "visible", "important")
+
+    // only works for input or textarea elements
     const currentFocus = document.activeElement
-    console.log(currentFocus)
+
     userInput.focus()
-    console.log(currentFocus)
 
     handleClickOutside(userInputContainer)
 
@@ -103,8 +115,18 @@ document.querySelector("body").addEventListener("copy", (event) => {
     event.preventDefault()
 })
 
+// inorder to use the default paste implementation (and avoid differentiating between 
+// content editable and input/texarea elments) I am calling document.execCommand("paste")
+// after setting the clipboard content to the retrieved data, but this command calls the
+// event which I am overriding creating an infinate loop, thus I hacked with this i = 0 thing
+// which is not good and should go away
+let i = 0
 //override document paste event handler (paste event bubbles from element to document)
 document.querySelector("body").addEventListener("paste", (event) => {
+    if (i % 2 === 1) {
+        ++i
+        return
+    }
     userInputContainer.style.setProperty("visibility", "visible", "important")
     const currentFocus = document.activeElement
     userInput.focus()
@@ -117,12 +139,15 @@ document.querySelector("body").addEventListener("paste", (event) => {
         userInputContainer.style.setProperty("visibility", "hidden", "important")
 
         browser.storage.local.get(inputValue).then(data => {
+            console.log(currentFocus)
             currentFocus.focus()
-            navigator.clipboard.writeText(data[userInput]).then(
+            console.log(currentFocus)
+            navigator.clipboard.writeText(data[inputValue]).then(
                 document.execCommand("paste")
             )
         })
         e.preventDefault()
     }
     event.preventDefault()
+    ++i;
 })

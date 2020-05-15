@@ -123,6 +123,7 @@ document.querySelector("body").addEventListener("copy", (event) => {
 
     let selection
     let range = saveSelection()
+                console.log(range)
     if (isInput(currentFocus)) {
         selection = currentFocus.value.slice(currentFocus.selectionStart, currentFocus.selectionEnd)
     } else if (currentFocus.tagName === 'IFRAME') {
@@ -154,18 +155,17 @@ document.querySelector("body").addEventListener("copy", (event) => {
         userInput.value = ""
         userInputContainer.style.setProperty("visibility", "hidden", "important")
         currentFocus.focus()
-        if (currentFocus.isContentEdidiable) {
+        if (!isInput(currentFocus)) {
+            console.log(range)
             restoreSelection(range)
         }
         e.preventDefault()
-
-        //refocus selection
-        restoreSelection(selection)
     }
     event.preventDefault()
 })
 
 //override document paste event handler (paste event bubbles from element to document)
+// pasted text should be selected after pasting
 document.querySelector("body").addEventListener("paste", (event) => {
     const currentFocus = document.activeElement
 
@@ -196,7 +196,6 @@ document.querySelector("body").addEventListener("paste", (event) => {
                 if (!selection.rangeCount) return false;
                 selection.deleteFromDocument();
                 selection.getRangeAt(0).insertNode(document.createTextNode(paste));
-
             }
         } else {
             browser.storage.local.get(inputValue).then(data => {
